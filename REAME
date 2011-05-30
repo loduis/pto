@@ -1,0 +1,11 @@
+
+  SISTEMA DE PLANTILLA PARA PHP
+
+1. Las plantillas son codigo php
+2. Cuando una plantilla es compilada automaticamente se guarda
+
+- Revisar documento para cachear contenido: http://www.mnot.net/cache_docs/
+3. Un sistema de plantilla completamente orientado a objeto consume menos memoria
+   que a que que necesita extraer variables al template
+4. Permisos adecuado para archivo: http://cloudsites.rackspacecloud.com/index.php/File_Permissions
+5. Escribiendo codigo escalable

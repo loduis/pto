@@ -1,0 +1,5 @@
+php_flag xdebug.profiler_enable On
+php_value xdebug.profiler_output_dir "c:\xdebug"
+php_flag xdebug.auto_trace On
+php_value xdebug.trace_output_dir "c:\xdebug"
+php_flag display_errors On
