@@ -1,6 +1,6 @@
 <?php
 
-abstract class PHPTemplate_Plugin
+abstract class PTO_Plugin
 {
     protected $_engine = NULL;
 

@@ -1,6 +1,6 @@
 <?php
 
-class PHPTemplate_Cache_File implements PHPTemplate_Cache_Interface
+class PTO_Cache_File implements PTO_Cache_Interface
 {
     private $_dirname = NULL;
     

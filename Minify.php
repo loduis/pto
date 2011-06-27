@@ -1,26 +1,32 @@
 <?php
 
-class PHPTemplate_Minify
+class PTO_Minify
 {
     public static function HTML($source)
     {
         if (FALSE !== stripos($source, '<?php')) {
             // Pull out the script blocks
-            preg_match_all("!<\?php\s*.*\?>!is", $source, $match);
-            $script_blocks = $match[0];
+            preg_match_all('!<\?php.+?\?>!ism', $source, $match);
+            $php_blocks = $match[0];
             $source = preg_replace(
-              "!<\?php\s*.*\?>!is",
-              '@@@PHPTEMPLATE:TRIM:PHP@@@',
+              '!<\?php.+?\?>!ism',
+              '@@@PTO:TRIM:PHP@@@',
               $source
             );
         }
         if (FALSE !== stripos($source, '<script')) {
             // Pull out the script blocks
-            preg_match_all("!<script[^>]+>.*?</script>!is", $source, $match);
+            preg_match_all("!<script[^>]+>(.*?)</script>!is", $source, $match);
+            foreach ($match[1] as $i=>$content) {
+                $content = trim($content);
+                if (!$content) {
+                    $match[0][$i] = preg_replace('!( )([a-z\-:]+)=("[^"]+")!', "\n$2=$3", $match[0][$i]);
+                }
+            }
             $script_blocks = $match[0];
             $source = preg_replace(
               "!<script[^>]+>.*?</script>!is",
-              '@@@PHPTEMPLATE:TRIM:SCRIPT@@@',
+              '@@@PTO:TRIM:SCRIPT@@@',
               $source
             );
         }
@@ -30,7 +36,7 @@ class PHPTemplate_Minify
             $pre_blocks = $match[0];
             $source = preg_replace(
               "!<pre[^>]*>.*?</pre>!is",
-              '@@@PHPTEMPLATE:TRIM:PRE@@@',
+              '@@@PTO:TRIM:PRE@@@',
               $source
             );
         }
@@ -40,32 +46,36 @@ class PHPTemplate_Minify
             $textarea_blocks = $match[0];
             $source = preg_replace(
               "!<textarea[^>]+>.*?</textarea>!is",
-              '@@@PHPTEMPLATE:TRIM:TEXTAREA@@@',
+              '@@@PTO:TRIM:TEXTAREA@@@',
               $source
             );
         }
-        $source = strtr($source, array("\r"=>'', "\t"=>' ', "\n"=>''));
+        $source = strtr($source, "\r\t\n", '   ');
         $source = preg_replace(array(
             '/( )( )+/',
-            '!\s+(</?(?:body|div|form|frame|h[1-6]|head|hr|html|li|link|meta|ol|opt(?:group|ion)|p|param|' .
-            't(?:able|body|head|d|h||r|foot|itle)|br|ul)\b[^>]*>)!i',
-            '!(<body\b[^>]*>)\s+!i',
-            '/(<[a-z\\-]+)\\s+([^>]+>)/i'
+            '!\s*(</?(?:body|div|form|frame|h[1-6]|head|hr|html|li|link|meta|ol|opt(?:group|ion)|p|param|' .
+            't(?:able|body|head|d|h||r|foot|itle)|br|ul)\b[^>]*>)\s*!i',
+            '!( )([a-z\-:]+)=("[^"]+")!'
             ),
-            array(' ', '$1', '$1', '$1\n$2'),
+            array(' ', '$1', "\n$2=$3"),
             $source
         );
+        if (isset($php_blocks)) {
+            // replace php blocks
+            self::_replace('@@@PTO:TRIM:PHP@@@', $php_blocks, $source);
+        }
         if (isset($script_blocks)) {
             // replace script blocks
-            self::_replace('@@@PHPTEMPLATE:TRIM:SCRIPT@@@', $script_blocks, $source);
+            self::_replace('@@@PTO:TRIM:SCRIPT@@@', $script_blocks, $source);
+            $source = preg_replace('!\s+(</?(?:script)\b[^>]*>)!i', '$1', $source);
         }
         if (isset($pre_blocks)) {
             // replace pre blocks
-            self::_replace('@@@PHPTEMPLATE:TRIM:PRE@@@', $pre_blocks, $source);
+            self::_replace('@@@PTO:TRIM:PRE@@@', $pre_blocks, $source);
         }
         if (isset ($textarea_blocks)) {
             // replace textarea blocks
-            self::_replace('@@@PHPTEMPLATE:TRIM:TEXTAREA@@@', $textarea_blocks, $source);
+            self::_replace('@@@PTO:TRIM:TEXTAREA@@@', $textarea_blocks, $source);
         }
 
         $source = stripslashes($source);
@@ -138,17 +148,26 @@ class PHPTemplate_Minify
             if (is_array($token)) {
                 list($tn, $ts) = $token; // tokens: number, string, line
                 if ($tn == T_INLINE_HTML) {
-                    $s  = NULL;
+                    $minify  = self::HTML($ts);
                     if (isset ($tokens[$i + 1])) {
                         list($_tn) = $tokens[$i + 1]; // tokens: number, string, line
                         if ($_tn == T_OPEN_TAG || $_tn == T_OPEN_TAG_WITH_ECHO) {
-                            if ((FALSE !== ($find = strrchr($ts, ' ')) || FALSE ($find = strrchr($ts, "\t"))) &&
+                            if ((FALSE !== ($find = strrchr($ts, ' ')) || FALSE !== ($find = strrchr($ts, "\t"))) &&
                               !trim($find)) {
-                                $s = ' ';
+                                $minify .= ' ';
                             }
                         }
                     }
-                    $source .= self::HTML($ts) . $s;
+                    //colocamos el espacio al principio de un html si existe cuando se cierra un tag php
+                    if (isset ($tokens[$i - 1])) {
+                        list($_tn) = $tokens[$i - 1]; // tokens: number, string, line
+                        if ($_tn == T_CLOSE_TAG) {
+                            if ($ts[0] == ' ' || $ts[0] == "\t") {
+                                $minify = ' ' . $minify;
+                            }
+                        }
+                    }
+                    $source .=  $minify;
                     $iw = FALSE;
                 } else {
                     if ($tn == T_OPEN_TAG) {
@@ -206,7 +225,7 @@ class PHPTemplate_Minify
                         $iw = TRUE;
                     } else {
                         $source .= $ts;
-                        $iw = TRUE;
+                        $iw = FALSE;
                     }
                 }
                 $ls = '';
