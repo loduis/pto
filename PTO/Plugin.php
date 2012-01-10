@@ -2,10 +2,10 @@
 
 abstract class PTO_Plugin
 {
-    protected $_engine = NULL;
+    protected $_PTO = NULL;
 
     final public function __construct($engine)
     {
-        $this->_engine = $engine;
+        $this->_PTO = $engine;
     }
 }

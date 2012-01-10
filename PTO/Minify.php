@@ -2,30 +2,30 @@
 
 class PTO_Minify
 {
-    public static function HTML($source)
+    public static function HTML($source, $stripslace = TRUE)
     {
         if (FALSE !== stripos($source, '<?php')) {
             // Pull out the script blocks
-            preg_match_all('!<\?php.+?\?>!ism', $source, $match);
+            preg_match_all('!<\?php.+?\?>\s?!ism', $source, $match);
             $php_blocks = $match[0];
             $source = preg_replace(
-              '!<\?php.+?\?>!ism',
+              '!<\?php.+?\?>\s?!ism',
               '@@@PTO:TRIM:PHP@@@',
               $source
             );
         }
         if (FALSE !== stripos($source, '<script')) {
             // Pull out the script blocks
-            preg_match_all("!<script[^>]+>(.*?)</script>!is", $source, $match);
-            foreach ($match[1] as $i=>$content) {
-                $content = trim($content);
-                if (!$content) {
-                    $match[0][$i] = preg_replace('!( )([a-z\-:]+)=("[^"]+")!', "\n$2=$3", $match[0][$i]);
+            preg_match_all("!<script([^>]*)>.*?</script>!is", $source, $match);
+            foreach ($match[1] as $i=>$property) {
+                $_property = preg_replace('!( )([a-z\-:]+)=("[^"]+")!', "\n$2=$3", $property);
+                if ($_property != $property) {
+                    $match[0][$i] = str_replace($property, $_property, $match[0][$i]);
                 }
             }
             $script_blocks = $match[0];
             $source = preg_replace(
-              "!<script[^>]+>.*?</script>!is",
+              "!<script[^>]*>.*?</script>!is",
               '@@@PTO:TRIM:SCRIPT@@@',
               $source
             );
@@ -55,18 +55,17 @@ class PTO_Minify
             '/( )( )+/',
             '!\s*(</?(?:body|div|form|frame|h[1-6]|head|hr|html|li|link|meta|ol|opt(?:group|ion)|p|param|' .
             't(?:able|body|head|d|h||r|foot|itle)|br|ul)\b[^>]*>)\s*!i',
-            '!( )([a-z\-:]+)=("[^"]+")!'
+            '!"\s+/>!',
+            '!( )([a-z\-:_]+)=("[^"]+")!'
             ),
-            array(' ', '$1', "\n$2=$3"),
+            array(' ', '$1', '"/>', "\n$2=$3"),
             $source
         );
-        if (isset($php_blocks)) {
-            // replace php blocks
-            self::_replace('@@@PTO:TRIM:PHP@@@', $php_blocks, $source);
-        }
+
         if (isset($script_blocks)) {
             // replace script blocks
             self::_replace('@@@PTO:TRIM:SCRIPT@@@', $script_blocks, $source);
+            //quitando espacio al final o inicio del tag script
             $source = preg_replace('!\s+(</?(?:script)\b[^>]*>)!i', '$1', $source);
         }
         if (isset($pre_blocks)) {
@@ -77,8 +76,13 @@ class PTO_Minify
             // replace textarea blocks
             self::_replace('@@@PTO:TRIM:TEXTAREA@@@', $textarea_blocks, $source);
         }
-
-        $source = stripslashes($source);
+        if (isset($php_blocks)) {
+            // replace php blocks
+            self::_replace('@@@PTO:TRIM:PHP@@@', $php_blocks, $source);
+        }
+        if ($stripslace) {
+            $source = stripslashes($source);
+        }
 
         return trim($source);
 
@@ -134,7 +138,17 @@ class PTO_Minify
           T_SL_EQUAL, // <<=
           T_SR_EQUAL, // >>=
         );
-
+        //evitamos que los script en linea sean procesados
+        if (FALSE !== stripos($source, '<script')) {
+            // Pull out the script blocks
+            preg_match_all("!<script[^>]+>.*?</script>!is", $source, $match);
+            $script_blocks = $match[0];
+            $source = preg_replace(
+              "!<script[^>]+>.*?</script>!is",
+              '@@@PTO:TRIM:SCRIPT@@@',
+              $source
+            );
+        }
         $tokens = token_get_all($source);
         $source = '';
         $c = count($tokens);
@@ -237,8 +251,12 @@ class PTO_Minify
                 $iw = TRUE;
             }
         }
-
-        return self::HTML($source);
+        // remplzamos el script
+        if (isset($script_blocks)) {
+            // replace script blocks
+            self::_replace('@@@PTO:TRIM:SCRIPT@@@', $script_blocks, $source);
+        }
+        return self::HTML($source, FALSE);
     }
 
 }
