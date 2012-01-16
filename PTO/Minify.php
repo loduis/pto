@@ -6,10 +6,10 @@ class PTO_Minify
     {
         if (FALSE !== stripos($source, '<?php')) {
             // Pull out the script blocks
-            preg_match_all('!<\?php.+?\?>\s?!ism', $source, $match);
+            preg_match_all('!<\?php.+?\?>!ism', $source, $match);
             $php_blocks = $match[0];
             $source = preg_replace(
-              '!<\?php.+?\?>\s?!ism',
+              '!<\?php.+?\?>!ism',
               '@@@PTO:TRIM:PHP@@@',
               $source
             );

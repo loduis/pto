@@ -3,23 +3,20 @@
 $response = array();
 $response['status']  = 200;
 $response['gzip']    = FALSE;
-$response['validator'] = $this->_config['Etag'] ?
-                            md5($response['body']) :
-                            $_SERVER['REQUEST_TIME'];
-//si el nombre del template include una extension se busca un archivo por este nombre
-if (FALSE !== strrpos($name, '.')) {
+if (FALSE !== strpos($name, '.')) {
     $filename = $this->_config['Template'] . $name;
     $response['body'] = file_get_contents($filename);
 } else {
     $filename = $this->_config['Template'] . $name . '.tpl.php';
     $response['body']    = $this->_getIncludeContents($filename);
 }
-$source = NULL;
-if ($this->_config['CacheControl'] || NULL != $this->_config['Cache']) {
+if ($this->_config['Cache']) {
+    $source = '';
     // strip nocache-tags from output
     if (FALSE !== strpos($response['body'], '<nocache>')) {
         if (!$this->_config['IgnoreNoCache']) {
             $source = $response['body'];
+            // AGREGAMOS EL NOMBRE DEL ARCHIVO AL TAG NOCACHE
             $source = str_replace('<nocache>', '<nocache file="' . $filename  . '">', $source);
         }
         //removemos el tag nocache
@@ -32,23 +29,26 @@ if ($this->_config['CacheControl'] || NULL != $this->_config['Cache']) {
     //minificamos el codigo html
     $response['body'] = PTO_Minify::HTML($response['body']);
     //si se puede comprir el texto
-    if (FALSE !==($gzip = gzencode($response['body'], 9, FORCE_GZIP))) {
+    if (FALSE !== ($gzip = gzencode($response['body'], 9, FORCE_GZIP))) {
         $response['gzip'] = TRUE;
         $response['body'] = $gzip;
     }
-} elseif (!$this->_config['CacheControl'] && NULL == $this->_config['Cache'] &&
-    FALSE !== strpos($response['body'], '<nocache>')) {//esto es una vista
-    $response['body'] = str_replace('<nocache>', '<nocache file="' . $filename  . '">', $response['body']);
-}
-//guardamos las respecitvas cache si existe un directorio donde guardarlas
-if (NULL != $this->_config['Cache']) {
+    // guardamos el validator
+    $response['validator'] = $this->_config['Etag'] ?
+                                md5($response['body']) :
+                                $_SERVER['REQUEST_TIME'];
     //full cache version file name
-    if (!isset($_filename)) {
-        $_filename = $this->_cacheId;
+    if (!isset($cached_file)) {
+        $cached_file = $this->_cacheId;
     }
     //guardamos el full cache no hay codigo para compilar
-    if (NULL === $source) {
-        $this->_setCache($_filename, $response);
+    if (!$source) {
+        $this->_setCache($cached_file, $response);
+        if ($this->_config['Etag']) {
+            if (FALSE !== ($source = file_get_contents($filename))) {
+                $this->_setCache($cached_file . '.php', PTO_Minify::PHP($source));
+            }
+        }
     } elseif (preg_match_all('!<nocache file="([^>]+)">(.*?)</nocache>!ism', $source, $matches)) {
         //obtemos las coincidencias por archivo
         $_matches = array();
@@ -90,8 +90,10 @@ if (NULL != $this->_config['Cache']) {
             }
         }
         // guardamos el nuevo codigo php compilado
-        if (NULL !== $source) {
-            $this->_setCache($_filename . '.php', PTO_Minify::PHP($source));
+        if ($source) {
+            $this->_setCache($cached_file . '.php', PTO_Minify::PHP($source));
         }
     }
+} elseif (FALSE !== strpos($response['body'], '<nocache>')) {//esto es una vista
+    $response['body'] = str_replace('<nocache>', '<nocache file="' . $filename  . '">', $response['body']);
 }

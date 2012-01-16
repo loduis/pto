@@ -1,0 +1,1 @@
+<!DOCTYPE HTML><html><head><title>Hola Mundo desde PTO</title></head><body>Esto es una plantilla, que utilza a etag como validator<br/>En este tipo de plantillas guardamos dos archivos en cache un .tpl y un .tpl.php <?php echo $this->from; ?></body></html>

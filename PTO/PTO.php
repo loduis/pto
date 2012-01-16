@@ -57,8 +57,10 @@ class PTO
     private $_cache = array();
 
     private $_cacheId  = NULL;
-	
+
 	private $_template = NULL;
+
+    private $_isCached = FALSE;
 
     /**
      * Constructor de la clase
@@ -72,16 +74,11 @@ class PTO
         $this->_addSeparator($config, 'Cache');
         // aseguramos que la cabecera de cache control tenga una fecha de expiracion
         if (!empty($config['CacheControl'])) {
-            //FUERZA A LA CACHE A QUE REVALIDE
-            if (FALSE === strpos($config['CacheControl'], 'max-age')) {
-                $config['CacheControl'] .= ', max-age=0';
-            }
-            if (FALSE === strpos($config['CacheControl'], 'must-revalidate')) {
-                $config['CacheControl'] .= ', must-revalidate';
-            }
+            $this->setConfig('CacheControl', $config['CacheControl']);
+            $config['CacheControl'] = $this->_config['CacheControl'];
         }
-        // evitamos array_merge dado que nos intereza primero que todo la
-        // configuracion que el usuario establece
+        // evitamos array_merge dado que nos intereza primero que todo
+        // la configuracion que el usuario establece
         $this->_config = $config + $this->_config;
     }
 
@@ -96,21 +93,25 @@ class PTO
     {
         $response = array();
         // si tenemos un directorio para la cache
-        if (NULL !== $this->_config['Cache']) {
-            // es el archivo cacheado
-            $_filename = $this->_cacheId;
-            // es el archivo cacheado compilado nuevo codigo php
-            if (($is_php = file_exists($_filename . '.php'))) {
-                $_filename .= '.php';
-            } elseif (!file_exists($_filename)) {
-                $_filename = NULL;
+        if ($this->_config['Cache']) {
+            // Un validator etag se usa siempre para contenido
+            // dinamico
+            $is_cached = TRUE;
+            if ($this->_config['Etag'] && !$this->_cacheId) {
+                $this->isCached($name);
             }
-            //get from cache
-            if (NULL !== $_filename) {
+            // es el archivo cacheado
+            $cached_file = $this->_cacheId;
+            // Es el archivo cacheado compilado, nuevo codigo php
+            if (!($is_php = file_exists($cached_file . '.php')) && !$this->_isCached) {
+                $cached_file = NULL;
+            }
+            // Obtenemos el codigo desde la cache
+            if ($cached_file) {
                 //necesita compilacion
                 if ($is_php) {
                     $response['status'] = 200;
-                    $response['body']   = $this->_getIncludeContents($_filename);
+                    $response['body']   = $this->_getIncludeContents($cached_file . '.php');
                     $response['gzip']   = FALSE;
                     // si el no-store esta presente en el cache control esto no debe ser
                     // guardado en el archivo
@@ -138,7 +139,7 @@ class PTO
                                                     md5($response['body']) :
                                                     $_SERVER['REQUEST_TIME'];
                         //guardamos el cache
-                        $this->_setCache($_filename, $response);
+                        $this->_setCache($cached_file, $response);
                     }
                 } else {
                     $response = $this->_cache;
@@ -170,13 +171,13 @@ class PTO
 		$response = $this->fetch($name);
 		// Negotiate whether to use compression.
 		$accept_gzip = (int) isset($_SERVER['HTTP_ACCEPT_ENCODING']) &&
-			strpos($_SERVER['HTTP_ACCEPT_ENCODING'], 'gzip') !== FALSE;
+                        strpos($_SERVER['HTTP_ACCEPT_ENCODING'], 'gzip') !== FALSE;
 		if ($response['gzip']) {
-			// append header not set
-			// fuerza al proxi a guardar dos contenidos uno normal y otro comprimido
-			header('Vary: Accept-Encoding', FALSE);
 			if ($accept_gzip) {
-				//impide que el servidor la comprima nuevamente en caso de que halla filtros activo
+                // append header not set
+                // fuerza al proxi a guardar dos contenidos uno normal y otro comprimido
+                header('Vary: Accept-Encoding', FALSE);
+                //impide que el servidor la comprima nuevamente en caso de que halla filtros activo
 				apache_setenv('no-gzip', '1');
 				// $response['body'] is already gzip'ed, so make sure
 				// zlib.output_compression does not compress it once more.
@@ -184,22 +185,24 @@ class PTO
 				//se le dice al cliente que se le esta enviando un contenido comprimido
 				header('Content-Encoding: gzip');
 			} else {
+                // Como todo los contenido se guardan comprimidos
+                // para disminuir el I/O
 				$response['body'] = gzdecode($response['body']);
 			}
-		}			
+		}
         if ($this->_config['Cache'] && $this->_config['CacheControl']) {
-			// hay una cache de la plantilla
+            // hay una cache de la plantilla
 			if ($response['status'] === 304) {
 				// See if the client has provided the required HTTP headers.
 				if ($this->_config['Etag']) {
 					$client_validator = isset($_SERVER['HTTP_IF_NONE_MATCH']) ?
-										stripslashes($_SERVER['HTTP_IF_NONE_MATCH']) :
-										FALSE;
+                                           stripslashes($_SERVER['HTTP_IF_NONE_MATCH']) :
+                                           FALSE;
 					$server_validator = '"' . $response['validator'] . '-' . $accept_gzip . '"';
 				} else {
 				   $client_validator = isset($_SERVER['HTTP_IF_MODIFIED_SINCE']) ?
-									   strtotime($_SERVER['HTTP_IF_MODIFIED_SINCE']) :
-									   FALSE;
+                                           strtotime($_SERVER['HTTP_IF_MODIFIED_SINCE']) :
+                                           FALSE;
 				   $server_validator = $response['validator'];
 				}
 				if ($client_validator && $client_validator == $server_validator) {
@@ -249,7 +252,15 @@ class PTO
             self::$_GLOBALS[$var] = $value;
         }
     }
-	
+
+	/**
+     * Asigna una variable al objeto
+     *
+     * @param string $name
+     * @param mixed $value
+     * @param bool $escape
+     * @return PTO
+     */
 	public function assign($name, $value, $escape = FALSE)
 	{
 		if ($escape) {
@@ -258,7 +269,6 @@ class PTO
 		$this->$name = $value;
 		return $this;
 	}
-	
 
     /**
      * Verifica si un idenficador de cache existe
@@ -271,10 +281,10 @@ class PTO
         $this->_cacheId  = $this->_getCacheId($name, $cache_id);
 		$this->_template = $name;
 		$this->_cache 	 = array();
-        $exist           = FALSE;
+        $this->_isCached = FALSE;
         if (file_exists($this->_cacheId)) {
             if (($this->_cache = $this->_getCache($this->_cacheId))) {
-                $exist = TRUE;
+                $this->_isCached = TRUE;
                 $this->_cache['status'] = 304;
                 if (!$this->_config['Etag'] && $this->_config['Expire']) {
                     $time_zone = date_default_timezone_get();
@@ -283,13 +293,13 @@ class PTO
                     date_default_timezone_set($time_zone);
                     if ($_SERVER['REQUEST_TIME'] > $expire) {
                         $this->_cache = array();
-                        $exist = FALSE;
+                        $this->_isCached = FALSE;
                     }
                 }
             }
         }
 
-        return $exist;
+        return $this->_isCached;
     }
 
     /**
@@ -302,10 +312,15 @@ class PTO
      */
     public function setConfig($name, $value)
     {
-        if (isset($this->_config[$name])) {
+        if (array_key_exists($name, $this->_config)) {
             // aseguramos que la cabecera de cache control tenga una fecha de expiracion
-            if ($name == 'CacheControl' && FALSE === strpos($value, 'max-age')) {
-                $value .= ', max-age=0';
+            if ($name == 'CacheControl') {
+                if (FALSE === strpos($value, 'max-age')) {
+                    $value .= ', max-age=0';
+                }
+                if (FALSE === strpos($value, 'must-revalidate')) {
+                    $value .= ', must-revalidate';
+                }
             }
             $this->_config[$name] = $value;
         }
@@ -380,7 +395,8 @@ class PTO
             return $this->$name;
         } else {
             $debug = debug_backtrace(FALSE);
-            trigger_error('Undefined property: ' . $name . ' in ' . $debug[0]['file'] . ' on line ' . $debug[0]['line']);
+            trigger_error('Undefined property: ' . $name . ' in ' . $debug[0]['file'] .
+                    ' on line ' . $debug[0]['line'], E_USER_ERROR);
         }
     }
 
@@ -412,7 +428,7 @@ class PTO
             $config[$key] .= '/';
         }
     }
-	
+
 	private function _escape($var)
 	{
 		return htmlspecialchars(stripslashes($var), ENT_QUOTES, 'UTF-8');
@@ -462,8 +478,9 @@ class PTO
         }
 
         $dirname = $this->_config['Cache'] . basename($this->_config['Template']) . '/';
+        $cache_id = $dirname . $cache_id . '.tpl';
 
-        return $dirname . $cache_id . '.tpl';
+        return $cache_id;
     }
 
     /**
@@ -475,24 +492,34 @@ class PTO
     private function _setCache($filename, $data)
     {
         if (is_array($data)) {
+            // No se puede guardar un archivo sin
+            // un cache validator o un content
+            if (empty($data['body']) || empty($data['validator'])) {
+                return FALSE;
+            }
             //este valor no sirve para nada almacenarlo
             $body = $data['body'];
             unset ($data['status'], $data['body']);
             $data = serialize($data) . "\n"  . $body;
         }
         $dirname = dirname($filename);
-        if (!is_dir($dirname)) {
-            mkdir($dirname, 0700, TRUE);
+        if (!($is_dir = is_dir($dirname))) {
+            $is_dir = mkdir($dirname, 0700, TRUE);
         }
-        if (is_dir($dirname) &&
-          (FALSE === file_put_contents(($tmpFile  = $dirname . '/' . uniqid(mt_rand()) . '.tmp'), $data) ||
-          !rename($tmpFile, $filename))) {
-            unlink($filename);
-            return FALSE;
-        } else {
-            chmod($filename, 0600);
-            return TRUE;
+        if ($is_dir) {
+            $tmpfile  = $dirname . '/' . uniqid(mt_rand()) . '.tmp';
+            if (FALSE === file_put_contents($tmpfile, $data) || !rename($tmpfile, $filename)) {
+                // Si existe la cache, debe estar desfazada por lo cual es mejor eliminar.
+                unlink($filename);
+                // elminamos el archivo temporal si existe para no dejar basura.
+                unlink($tmpfile);
+            } else {
+                chmod($filename, 0600);
+                return TRUE;
+            }
         }
+
+        return FALSE;
     }
 
     /**
